@@ -104,9 +104,8 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            cc-connect-*.*.tar.gz
-            cc-connect-*.*.zip
-          generate_release_notes: true
+            ${{ matrix.goos == 'windows' && 'cc-connect-*.zip' || 'cc-connect-*.tar.gz' }}
+          generate_release_notes: false
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
