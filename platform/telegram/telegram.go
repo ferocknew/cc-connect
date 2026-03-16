@@ -312,6 +312,14 @@ func (p *Platform) runConnection(ctx context.Context) error {
 	self := bot.SelfUser()
 	slog.Info("telegram: connected", "bot", self.UserName)
 
+	// Delete any existing webhook to use getUpdates mode.
+	// Telegram doesn't allow using both webhook and getUpdates simultaneously.
+	if _, err := bot.Request(tgbotapi.DeleteWebhookConfig{DropPendingUpdates: true}); err != nil {
+		slog.Warn("telegram: failed to delete webhook", "error", err)
+	}
+
+	// Drain pending updates from previous session to avoid re-processing old messages.
+	// offset -1 tells Telegram to mark all pending updates as confirmed, returning only the latest one.
 	drain := tgbotapi.NewUpdate(-1)
 	drain.Timeout = 0
 	if _, err := bot.GetUpdates(drain); err != nil {
