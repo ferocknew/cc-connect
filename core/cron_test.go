@@ -180,7 +180,7 @@ func TestRenderCronCard_WithButtons(t *testing.T) {
 	scheduler := NewCronScheduler(store)
 	e.cronScheduler = scheduler
 
-	card := e.renderCronCard("test:ch1")
+	card := e.renderCronCard("test:ch1", "")
 	if card == nil {
 		t.Fatal("card should not be nil")
 	}
@@ -245,7 +245,7 @@ func TestRenderCronCard_HasHint(t *testing.T) {
 	scheduler := NewCronScheduler(store)
 	e.cronScheduler = scheduler
 
-	card := e.renderCronCard("test:ch1")
+	card := e.renderCronCard("test:ch1", "")
 	text := card.RenderText()
 	if !strings.Contains(text, "/cron add") || !strings.Contains(text, "/cron mute") {
 		t.Errorf("card should contain command hints, got:\n%s", text)
@@ -459,6 +459,41 @@ func TestCronScheduler_AddJob_NormalizesSessionMode(t *testing.T) {
 	}
 	if job.SessionMode != "new_per_run" {
 		t.Errorf("SessionMode = %q, want new_per_run", job.SessionMode)
+	}
+}
+
+func TestCronScheduler_UsesNewSession_GlobalDefault(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewCronStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs := NewCronScheduler(store)
+
+	// Test 1: global default is "new_per_run", job has no session_mode set
+	cs.SetDefaultSessionMode("new_per_run")
+	job := &CronJob{SessionMode: ""}
+	if !cs.UsesNewSession(job) {
+		t.Error("global new_per_run + job empty: expected UsesNewSession=true")
+	}
+
+	// Test 2: per-job "reuse" overrides global "new_per_run"
+	job.SessionMode = "reuse"
+	if cs.UsesNewSession(job) {
+		t.Error("global new_per_run + job reuse: expected UsesNewSession=false")
+	}
+
+	// Test 3: per-job "new_per_run" overrides global default (reuse)
+	cs.SetDefaultSessionMode("")
+	job.SessionMode = "new_per_run"
+	if !cs.UsesNewSession(job) {
+		t.Error("global reuse + job new_per_run: expected UsesNewSession=true")
+	}
+
+	// Test 4: both global and job are default (reuse)
+	job.SessionMode = ""
+	if cs.UsesNewSession(job) {
+		t.Error("global reuse + job empty: expected UsesNewSession=false")
 	}
 }
 

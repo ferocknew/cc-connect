@@ -9,7 +9,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/creack/pty v1.1.24
-	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
+	github.com/go-telegram/bot v1.20.0
 	github.com/gorilla/websocket v1.5.0
 	github.com/larksuite/oapi-sdk-go/v3 v3.5.3
 	github.com/line/line-bot-sdk-go/v8 v8.19.0
@@ -18,7 +18,7 @@ require (
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/slack-go/slack v0.15.0
 	github.com/stretchr/testify v1.9.0
-	golang.org/x/net v0.52.0
+	golang.org/x/net v0.51.0
 	rsc.io/qr v0.2.0
 )
 

@@ -24,6 +24,17 @@ type ReplyContextReconstructor interface {
 	ReconstructReplyCtx(sessionKey string) (any, error)
 }
 
+// CronReplyTargetResolver is an optional interface for platforms that need to
+// map a logical cron session key to the actual reply target used at execution
+// time. This is useful for platforms where proactive replies may need to create
+// or switch to a thread before the cron run starts.
+//
+// Implementations that do not need special handling should return
+// ErrNotSupported so callers can fall back to ReconstructReplyCtx(sessionKey).
+type CronReplyTargetResolver interface {
+	ResolveCronReplyTarget(sessionKey string, title string) (resolvedSessionKey string, replyCtx any, err error)
+}
+
 // SessionEnvInjector is an optional interface for agents that accept
 // per-session environment variables (e.g. CC_PROJECT, CC_SESSION_KEY).
 type SessionEnvInjector interface {
@@ -128,6 +139,19 @@ type FileSender interface {
 // MessageUpdater is an optional interface for platforms that support updating messages.
 type MessageUpdater interface {
 	UpdateMessage(ctx context.Context, replyCtx any, content string) error
+}
+
+// ProgressStyleProvider is an optional interface for platforms that expose
+// a preferred style for intermediate progress rendering.
+// Typical values: "legacy", "compact", "card".
+type ProgressStyleProvider interface {
+	ProgressStyle() string
+}
+
+// ProgressCardPayloadSupport is an optional interface for platforms that can
+// parse and render structured progress-card payloads.
+type ProgressCardPayloadSupport interface {
+	SupportsProgressCardPayload() bool
 }
 
 // ButtonOption represents a clickable inline button.
@@ -366,6 +390,12 @@ type ModeSwitcher interface {
 	SetMode(mode string)
 	GetMode() string
 	PermissionModes() []PermissionModeInfo
+}
+
+// LiveModeSwitcher is an optional interface for running agent sessions that can
+// apply a mode change immediately without restarting the process.
+type LiveModeSwitcher interface {
+	SetLiveMode(mode string) bool
 }
 
 // PermissionModeInfo describes a permission mode for display.
