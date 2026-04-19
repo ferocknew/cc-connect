@@ -357,6 +357,43 @@ func (p *Platform) apiRequestJSON(method, url string, body any, result any) erro
 
 var _ core.ImageSender = (*Platform)(nil)
 
+// SendFile uploads and sends a file via QQ Bot rich media API.
+// Implements core.FileSender.
+func (p *Platform) SendFile(ctx context.Context, replyCtx any, file core.FileAttachment) error {
+	rctx, ok := replyCtx.(*replyContext)
+	if !ok {
+		return fmt.Errorf("qqbot: SendFile: invalid reply context type %T", replyCtx)
+	}
+
+	fileInfo, err := p.uploadRichMedia(rctx, 4, file.Data)
+	if err != nil {
+		return fmt.Errorf("qqbot: upload file: %w", err)
+	}
+
+	var url string
+	switch rctx.messageType {
+	case "group":
+		url = fmt.Sprintf("%s/v2/groups/%s/messages", p.apiBase(), rctx.groupOpenID)
+	case "c2c":
+		url = fmt.Sprintf("%s/v2/users/%s/messages", p.apiBase(), rctx.userOpenID)
+	default:
+		return fmt.Errorf("qqbot: unknown message type %q", rctx.messageType)
+	}
+
+	body := map[string]any{
+		"msg_type": 7,
+		"media":    map[string]any{"file_info": fileInfo},
+	}
+	if rctx.eventMsgID != "" {
+		body["msg_id"] = rctx.eventMsgID
+		body["msg_seq"] = p.nextMsgSeq(rctx.eventMsgID)
+	}
+
+	return p.apiRequest("POST", url, body)
+}
+
+var _ core.FileSender = (*Platform)(nil)
+
 // Stop shuts down the platform.
 func (p *Platform) Stop() error {
 	if p.cancel != nil {
@@ -898,11 +935,12 @@ func (p *Platform) handleGroupMessage(data json.RawMessage) {
 	content := stripAtMention(d.Content)
 	content = prependQuotedMessage(p.resolveQuotedText(d.MessageReference), content)
 
-	// Download image attachments
+	// Download image and file attachments
 	images := downloadAttachmentImages(d.Attachments)
+	files := downloadAttachmentFiles(d.Attachments)
 	p.cacheMessage(d.ID, contentOrAttachmentSummary(content, d.Attachments))
 
-	if content == "" && len(images) == 0 {
+	if content == "" && len(images) == 0 && len(files) == 0 {
 		return
 	}
 
@@ -929,10 +967,11 @@ func (p *Platform) handleGroupMessage(data json.RawMessage) {
 		ChatName:   d.GroupOpenID,         // group openid as fallback (no group name API)
 		Content:    content,
 		Images:     images,
+		Files:      files,
 		ReplyCtx:   rctx,
 	}
 
-	slog.Debug("qqbot: group message received", "group", d.GroupOpenID, "user", d.Author.MemberOpenID, "len", len(content), "images", len(images))
+	slog.Debug("qqbot: group message received", "group", d.GroupOpenID, "user", d.Author.MemberOpenID, "len", len(content), "images", len(images), "files", len(files))
 	p.handler(p, msg)
 }
 
@@ -976,11 +1015,12 @@ func (p *Platform) handleC2CMessage(data json.RawMessage) {
 	content := strings.TrimSpace(d.Content)
 	content = prependQuotedMessage(p.resolveQuotedText(d.MessageReference), content)
 
-	// Download image attachments
+	// Download image and file attachments
 	images := downloadAttachmentImages(d.Attachments)
+	files := downloadAttachmentFiles(d.Attachments)
 	p.cacheMessage(d.ID, contentOrAttachmentSummary(content, d.Attachments))
 
-	if content == "" && len(images) == 0 {
+	if content == "" && len(images) == 0 && len(files) == 0 {
 		return
 	}
 
@@ -1000,10 +1040,11 @@ func (p *Platform) handleC2CMessage(data json.RawMessage) {
 		UserName:   d.Author.UserOpenID,
 		Content:    content,
 		Images:     images,
+		Files:      files,
 		ReplyCtx:   rctx,
 	}
 
-	slog.Debug("qqbot: c2c message received", "user", d.Author.UserOpenID, "len", len(content), "images", len(images))
+	slog.Debug("qqbot: c2c message received", "user", d.Author.UserOpenID, "len", len(content), "images", len(images), "files", len(files))
 	p.handler(p, msg)
 }
 
@@ -1210,6 +1251,44 @@ func downloadAttachmentImages(attachments []attachment) []core.ImageAttachment {
 		})
 	}
 	return images
+}
+
+// downloadAttachmentFiles downloads all non-image file attachments and returns FileAttachments.
+func downloadAttachmentFiles(attachments []attachment) []core.FileAttachment {
+	var files []core.FileAttachment
+	for _, att := range attachments {
+		if strings.HasPrefix(att.ContentType, "image/") {
+			continue
+		}
+		url := att.URL
+		if url == "" {
+			continue
+		}
+		if !strings.HasPrefix(url, "http") {
+			url = "https://" + url
+		}
+		resp, err := core.HTTPClient.Get(url)
+		if err != nil {
+			slog.Warn("qqbot: download file failed", "url", url, "error", err)
+			continue
+		}
+		data, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			slog.Warn("qqbot: read file body failed", "error", err)
+			continue
+		}
+		mime := att.ContentType
+		if mime == "" {
+			mime = http.DetectContentType(data)
+		}
+		files = append(files, core.FileAttachment{
+			MimeType: mime,
+			Data:     data,
+			FileName: att.Filename,
+		})
+	}
+	return files
 }
 
 // stripAtMention removes the leading @bot mention from group message content.
