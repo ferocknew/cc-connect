@@ -9,10 +9,12 @@ permissions:
   contents: write
 
 jobs:
-  build-linux-amd64:
+  build:
+    name: Build linux/amd64
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -40,28 +42,52 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
-      - name: Build linux/amd64
+      - name: Download dependencies
+        run: go mod download
+        env:
+          GOPROXY: https://proxy.golang.org,direct
+          GOSUMDB: sum.golang.org
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Build binary
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
-          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+          BASE_NAME="cc-connect-${VERSION}-${GOOS}-${GOARCH}"
+          OUTPUT_NAME="$BASE_NAME"
           COMMIT=$(git rev-parse --short HEAD)
           BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-          LDFLAGS="-s -w -X main.version=$VERSION -X main.commit=$COMMIT -X main.buildTime=$BUILD_TIME"
-          mkdir -p dist
+          LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}"
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-            go build -ldflags "$LDFLAGS" -o dist/cc-connect ./cmd/cc-connect
-          cd dist && tar czf cc-connect-${VERSION}-linux-amd64.tar.gz cc-connect && sha256sum * > checksums.txt
+            go build -ldflags "$LDFLAGS" -o "$OUTPUT_NAME" ./cmd/cc-connect
+          tar czf "${BASE_NAME}.tar.gz" "$OUTPUT_NAME"
 
-      - name: Upload build artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: cc-connect-linux-amd64
-          path: dist/
+          name: release-assets-linux-amd64
+          path: cc-connect-*.tar.gz
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
 
       - name: Create test release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
           name: "Test Build: ${{ github.ref_name }}"
           prerelease: true
-          files: |
-            dist/*
+          files: artifacts/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
