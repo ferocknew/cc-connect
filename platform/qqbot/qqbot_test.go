@@ -455,3 +455,135 @@ func TestUploadRichMedia_NoFileNameForOtherFileTypes(t *testing.T) {
 		t.Fatalf("expected no file_name for fileType 1, got %v", receivedBody["file_name"])
 	}
 }
+
+func TestQuotedTextFromElements(t *testing.T) {
+	tests := []struct {
+		name     string
+		elements []msgElement
+		want     string
+	}{
+		{
+			name:     "empty elements",
+			elements: nil,
+			want:     "",
+		},
+		{
+			name:     "element with content",
+			elements: []msgElement{{Content: "被引用的消息"}},
+			want:     "被引用的消息",
+		},
+		{
+			name:     "element with whitespace content",
+			elements: []msgElement{{Content: "  "}},
+			want:     "",
+		},
+		{
+			name: "element with only attachments",
+			elements: []msgElement{
+				{Attachments: []attachment{{ContentType: "image/png", URL: "https://example.com/img.png"}}},
+			},
+			want: "[图片]",
+		},
+		{
+			name: "content takes priority over attachments",
+			elements: []msgElement{
+				{
+					Content:     "有内容的消息",
+					Attachments: []attachment{{ContentType: "image/png", URL: "https://example.com/img.png"}},
+				},
+			},
+			want: "有内容的消息",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := quotedTextFromElements(tt.elements)
+			if got != tt.want {
+				t.Errorf("quotedTextFromElements() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHandleC2CMessage_QuoteFromMsgElements(t *testing.T) {
+	p := &Platform{
+		allowFrom:    "*",
+		messageCache: map[string]cachedMessage{},
+	}
+
+	var got *core.Message
+	p.handler = func(_ core.Platform, msg *core.Message) {
+		got = msg
+	}
+
+	// Simulate a quote message (message_type=103) with msg_elements[0] containing the quoted content
+	msgType := 103
+	payload := map[string]any{
+		"id":        "msg-new",
+		"content":   "我的回复",
+		"timestamp": time.Now().Format(time.RFC3339),
+		"author": map[string]any{
+			"user_openid": "user-1",
+		},
+		"message_type": msgType,
+		"msg_elements": []map[string]any{
+			{"content": "这是被引用的消息内容"},
+		},
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	p.handleC2CMessage(data)
+
+	if got == nil {
+		t.Fatal("expected message")
+	}
+	want := "[引用消息]\n这是被引用的消息内容\n\n我的回复"
+	if got.Content != want {
+		t.Fatalf("content = %q, want %q", got.Content, want)
+	}
+}
+
+func TestHandleGroupMessage_QuoteFromMsgElements(t *testing.T) {
+	p := &Platform{
+		allowFrom:    "*",
+		messageCache: map[string]cachedMessage{},
+	}
+
+	var got *core.Message
+	p.handler = func(_ core.Platform, msg *core.Message) {
+		got = msg
+	}
+
+	// Simulate a group quote message (message_type=103) with msg_elements[0]
+	msgType := 103
+	payload := map[string]any{
+		"id":             "msg-new",
+		"group_openid":   "group-1",
+		"content":        "<@!bot123>  看看这个",
+		"timestamp":      time.Now().Format(time.RFC3339),
+		"message_type":   msgType,
+		"msg_elements":   []map[string]any{
+			{"content": "之前的讨论内容"},
+		},
+		"author": map[string]any{
+			"member_openid": "user-1",
+		},
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	p.handleGroupMessage(data)
+
+	if got == nil {
+		t.Fatal("expected message")
+	}
+	want := "[引用消息]\n之前的讨论内容\n\n看看这个"
+	if got.Content != want {
+		t.Fatalf("content = %q, want %q", got.Content, want)
+	}
+}

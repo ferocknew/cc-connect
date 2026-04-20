@@ -132,6 +132,16 @@ type messageReference struct {
 	SourceMessage     *quotedMessage `json:"source_message,omitempty"`
 }
 
+// msgTypeQuote indicates a quote (reply) message in the QQ Bot API.
+const msgTypeQuote = 103
+
+// msgElement represents a message element in QQ Bot event.
+// For quote messages (message_type=103), msg_elements[0] contains the quoted content.
+type msgElement struct {
+	Content     string       `json:"content"`
+	Attachments []attachment `json:"attachments"`
+}
+
 // New creates a new QQ Bot platform from config options.
 func New(opts map[string]any) (core.Platform, error) {
 	appID, _ := opts["app_id"].(string)
@@ -909,6 +919,8 @@ func (p *Platform) handleGroupMessage(data json.RawMessage) {
 		Timestamp        string            `json:"timestamp"`
 		Attachments      []attachment      `json:"attachments"`
 		MessageReference *messageReference `json:"message_reference"`
+		MessageType      *int              `json:"message_type"`
+		MsgElements      []msgElement      `json:"msg_elements"`
 		Author           struct {
 			MemberOpenID string `json:"member_openid"`
 		} `json:"author"`
@@ -941,9 +953,11 @@ func (p *Platform) handleGroupMessage(data json.RawMessage) {
 
 	// Strip leading @bot mention (the official API includes it as content prefix)
 	content := stripAtMention(d.Content)
-	content = prependQuotedMessage(p.resolveQuotedText(d.MessageReference), content)
-
-	// Download image and file attachments
+	quotedText := p.resolveQuotedText(d.MessageReference)
+	if quotedText == "" && d.MessageType != nil && *d.MessageType == msgTypeQuote {
+		quotedText = quotedTextFromElements(d.MsgElements)
+	}
+	content = prependQuotedMessage(quotedText, content)
 	images := downloadAttachmentImages(d.Attachments)
 	files := downloadAttachmentFiles(d.Attachments)
 	p.cacheMessage(d.ID, contentOrAttachmentSummary(content, d.Attachments))
@@ -990,6 +1004,8 @@ func (p *Platform) handleC2CMessage(data json.RawMessage) {
 		Timestamp        string            `json:"timestamp"`
 		Attachments      []attachment      `json:"attachments"`
 		MessageReference *messageReference `json:"message_reference"`
+		MessageType      *int              `json:"message_type"`
+		MsgElements      []msgElement      `json:"msg_elements"`
 		Author           struct {
 			UserOpenID string `json:"user_openid"`
 		} `json:"author"`
@@ -1021,7 +1037,11 @@ func (p *Platform) handleC2CMessage(data json.RawMessage) {
 	}
 
 	content := strings.TrimSpace(d.Content)
-	content = prependQuotedMessage(p.resolveQuotedText(d.MessageReference), content)
+	quotedText := p.resolveQuotedText(d.MessageReference)
+	if quotedText == "" && d.MessageType != nil && *d.MessageType == msgTypeQuote {
+		quotedText = quotedTextFromElements(d.MsgElements)
+	}
+	content = prependQuotedMessage(quotedText, content)
 
 	// Download image and file attachments
 	images := downloadAttachmentImages(d.Attachments)
@@ -1469,6 +1489,20 @@ func quotedMessageText(msg *quotedMessage) string {
 		return title
 	}
 	return contentOrAttachmentSummary("", msg.Attachments)
+}
+
+// quotedTextFromElements extracts quoted message text from msg_elements[0].
+// QQ Bot sends the referenced message content in msg_elements[0] for quote messages (message_type=103).
+func quotedTextFromElements(elements []msgElement) string {
+	if len(elements) == 0 {
+		return ""
+	}
+	elem := elements[0]
+	content := strings.TrimSpace(elem.Content)
+	if content != "" {
+		return content
+	}
+	return contentOrAttachmentSummary("", elem.Attachments)
 }
 
 func prependQuotedMessage(quoted, content string) string {
